@@ -1,114 +1,111 @@
-<p align="center">
-  <a href="https://t.me/spidy-bots">
-    <img src="https://img.shields.io/badge/SPIDY-BOTS-303030?style=for-the-badge&logo=telegram&logoColor=white"/>
-  </a>
-</p>
+# TXT Extractor (Modernized API Service)
 
-<h1 align="center">
-  <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=900&size=30&pause=1000&center=true&vCenter=true&multiline=true&repeat=true&width=500&lines=TXT+EXTRACTOR;Extract+content+from+multiple+edtech+apps;Click+%2Fstart+to+begin"/>
-</h1>
+Backend-only extraction service for Appx-style LMS APIs.  
+It authenticates with either `email/password` or `token`, fetches both purchased + non-purchased batches, extracts media/resource URLs, and stores them in `.txt` output files.
 
----
+## Why the old repo stopped working
+The previous codebase was tightly coupled to Telegram chat flows and older API assumptions. Key breakages identified:
 
-### ⚙️ Features
-- Extracts Txt from **AppxV2 & AppxV3** platforms
-- Supports **Khan GS**, **ClassPlus**, and **PW (PhysicsWallah)**
-- Token-based and login-based extraction supported
-- Clean UI with Telegram buttons (use `/start` to begin)
-- Admin-only premium controls available in `modules/`
+1. **Outdated auth assumptions**: token flow used a placeholder user id (`"extracted_userid_from_token"`) which breaks downstream course APIs.
+2. **Hardcoded transport headers and brittle parsing**: old code relied on static mobile headers and in one path parsed API payload with HTML parser.
+3. **Single-endpoint dependency**: login/course methods assumed one endpoint version only; no fallback for moved/versioned routes.
+4. **Mixed runtime architecture**: Telegram client + flask keepalive + legacy start scripts made Render deployments fragile.
+5. **Dependency drift**: many unused, heavy, and stale libraries increased startup time and failure points.
 
----
+## What is updated
+- Added a clean REST API service with:
+  - `GET /health`
+  - `POST /extract`
+  - `GET /files/<filename>` for generated txt downloads
+- Refactored extraction into `service/extractor.py` with:
+  - Retry-enabled HTTP session
+  - Login endpoint fallbacks
+  - Purchased + non-purchased batch collection
+  - Batch extraction across both folder-wise(v2) and subject/topic(v3) content trees
+  - AES decrypt-or-plain logic for encrypted links
+  - URL dedupe and safe file naming
+- Removed hardcoded secrets/tokens and made decrypt key/IV environment-overridable.
+- Updated deployment/runtime config for Render free tier (`Procfile`, `start.sh`, `requirements.txt`, `Dockerfile`).
 
-### 🚀 How to Use
-Just send `/start` — all features are handled via buttons.
+## API usage
 
----
-
-### 📸 Screenshots
-<p align="center">
-  <img src="img/1.jpg" width="45%"/>
-  <img src="img/2.jpg" width="45%"/><br>
-  <img src="img/3.jpg" width="45%"/>
-  <img src="img/4.jpg" width="45%"/><br>
-  <img src="img/5.jpg" width="45%"/>
-  <img src="img/6.jpg" width="45%"/>
-</p>
-
----
-### 🔑 Required Environment Variables (.env)
-You need to set the following variables for the bot to run. These are read using `os.environ.get()` in the code.
-
-```env
-API_ID=123456               # Get from https://my.telegram.org
-API_HASH=your_api_hash     # Get from https://my.telegram.org
-BOT_TOKEN=your_bot_token   # Get from https://t.me/BotFather
-OWNER_ID=123456789         # Your Telegram user ID
-SUDO_USERS=123456789 987654321  # Space-separated admin user IDs
-MONGO_URL=mongodb+srv://user:pass@cluster.mongodb.net/...  # MongoDB connection URI
-CHANNEL_ID=-100xxxxxxxxxx  # Telegram channel ID with -100 prefix
-```
-
-> **Where to get these?**  
-• `API_ID` & `API_HASH` → [my.telegram.org](https://my.telegram.org) → API Development Tools  
-• `BOT_TOKEN` → [@BotFather](https://t.me/BotFather)  
-• `OWNER_ID`, `SUDO_USERS` → Get your Telegram ID from [@userinfobot](https://t.me/userinfobot)  
-• `CHANNEL_ID` → Right-click channel > Copy ID (if bot is admin)  
-• `MONGO_URL` → From your MongoDB Atlas project dashboard
-
----
-### ☁️ Deploy to Render
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Popeye68/TXT-EXTRACTOR)
-
-### ☁️ Deploy to Heroku (Manual)
+### 1) Health check
 ```bash
-1. Fork this repo
-2. Create a new Heroku app
-3. Set buildpacks: heroku/python
-4. Add env variables: API_ID, API_HASH, BOT_TOKEN, etc.
-5. Deploy your app and scale worker to 1
+curl http://localhost:10000/health
 ```
 
----
-
-### 🖥️ VPS Installation
+### 2) Trigger extraction
 ```bash
-sudo apt update && sudo apt install git python3-pip -y
-git clone https://github.com/Popeye68/TXT-EXTRACTOR
-cd TXT-EXTRACTOR
-pip3 install -r requirements.txt
-
-# Set your API credentials
-export API_ID=123456
-export API_HASH=your_api_hash
-export BOT_TOKEN=your_bot_token
-
-# Run the bot
-python3 bot.py
+curl -X POST http://localhost:10000/extract \
+  -H "Content-Type: application/json" \
+  -d '{
+    "api_base": "https://example-api-domain.com",
+    "email": "user@example.com",
+    "password": "secret123"
+  }'
 ```
 
----
+Token login example:
+```bash
+curl -X POST http://localhost:10000/extract \
+  -H "Content-Type: application/json" \
+  -d '{
+    "api_base": "https://example-api-domain.com",
+    "token": "your_access_token",
+    "user_id": "12345"
+  }'
+```
 
-### 🔧 Customize Freely
-Feel free to **fork this repo**, add your own tweaks, and build your own version.
+Optional course filter:
+```json
+"course_ids": ["123", "456"]
+```
 
----
+### 3) Download output file
+Use `download_url` from `/extract` response:
+```bash
+curl -OJ http://localhost:10000/files/<generated-file>.txt
+```
 
-### ⭐ GitHub Buttons
+## Environment variables
+| Variable | Required | Default | Purpose |
+|---|---|---|---|
+| `PORT` | No | `10000` | Web service port |
+| `LOG_LEVEL` | No | `INFO` | Logging verbosity |
+| `OUTPUT_DIR` | No | `outputs` | Where txt files are stored |
+| `EXTRACTOR_USER_AGENT` | No | modern mobile UA | Override request UA |
+| `APPX_DECRYPT_KEY` | No | `638udh3829162018` | AES key override |
+| `APPX_DECRYPT_IV` | No | `fedcba9876543210` | AES iv override |
+| `WEB_CONCURRENCY` | No | `2` | Gunicorn workers |
+| `GUNICORN_THREADS` | No | `4` | Gunicorn threads |
+| `GUNICORN_TIMEOUT` | No | `120` | Gunicorn timeout |
 
-<p align="center">
-  <a href="https://github.com/Popeye68/TXT-EXTRACTOR/stargazers">
-    <img src="https://img.shields.io/github/stars/Popeye68/TXT-EXTRACTOR.svg?style=for-the-badge&label=Stars&logo=github" />
-  </a>
-  <a href="https://github.com/Popeye68/TXT-EXTRACTOR/network/members">
-    <img src="https://img.shields.io/github/forks/Popeye68/TXT-EXTRACTOR.svg?style=for-the-badge&label=Forks&logo=github" />
-  </a>
-</p>
+## Local run
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python app.py
+```
 
+## Render deployment (free web service)
+1. Push this repo to GitHub.
+2. In Render: **New +** → **Web Service** → connect repo.
+3. Runtime: **Python**.
+4. Build Command:
+   ```bash
+   pip install -r requirements.txt
+   ```
+5. Start Command:
+   ```bash
+   ./start.sh
+   ```
+6. Set env vars (optional): `LOG_LEVEL`, `OUTPUT_DIR`, `WEB_CONCURRENCY` etc.
+7. Deploy and verify:
+   - `GET /health`
+   - `POST /extract`
 
-
-
----
-
-<p align="center">
-  Made with ❤️ by <a href="https://t.me/spidy_bots">Spidy</a>
-</p>
+## Notes
+- Keep credentials outside code (Render environment variables or caller-provided body).
+- No frontend/UI is required.
+- Service is lightweight for free-tier deployment.
