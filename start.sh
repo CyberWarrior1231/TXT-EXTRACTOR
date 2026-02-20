@@ -1,6 +1,5 @@
-echo "Cloning Repo..."
-git clone https://github.com/Popeye68/TXT-EXTRACTOR
-cd /TXT-EXTRACTOR
-pip install -r requirements.txt
-echo "Starting Bot..."
-python -m Extractor
+#!/usr/bin/env bash
+set -euo pipefail
+
+export PORT="${PORT:-10000}"
+exec gunicorn --bind "0.0.0.0:${PORT}" app:app --workers "${WEB_CONCURRENCY:-2}" --threads "${GUNICORN_THREADS:-4}" --timeout "${GUNICORN_TIMEOUT:-120}"
